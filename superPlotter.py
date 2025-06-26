@@ -6,20 +6,19 @@ import json
 import numpy as np
 
 def superPlotter(data, x="date", y="price", color="quality", filter="location", 
-                title="Interactive Scatter Plot", output_file="interactive_plot.html"):
+                facet=None, title="Interactive Scatter Plot", output_file="interactive_plot.html"):
     """
-    Create an enhanced Plotly scatter plot with custom checkbox filtering and flexible y-axis configuration.
-    Now supports multiple datasets with tabbed interface and flexible multi-column faceting!
+    Create an enhanced Plotly scatter plot with custom checkbox filtering and optional faceting.
+    Now supports multiple datasets with tabbed interface and dynamic faceting per dataset!
+    Each selected filter option creates its own row of subplots.
     
     Parameters:
     - data: pandas DataFrame OR dict of {str: pandas DataFrame} for multiple datasets
     - x: column name for x-axis
-    - y: flexible y-axis specification:
-         * string: single column name (creates one plot)
-         * list: multiple column names (creates faceted subplots)
-         * dict: for multi-dataset, maps dataset_name -> y_spec where y_spec can be string or list
+    - y: column name for y-axis  
     - color: column name for color grouping
-    - filter: column name for checkbox filtering
+    - filter: column name for checkbox filtering (each selection creates a row)
+    - facet: column name for faceting (creates columns within each filter row), optional
     - title: plot title (or base title for multiple datasets)
     - output_file: output HTML filename
     """
@@ -28,39 +27,17 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
     if isinstance(data, pd.DataFrame):
         datasets = {"Main": data}
         single_dataset = True
-        # For single dataset, y can be string or list
-        if isinstance(y, dict):
-            raise ValueError("For single dataset, y cannot be a dictionary. Use string or list.")
-        y_config = {"Main": y}
     elif isinstance(data, dict):
         datasets = data
         single_dataset = False
-        # For multi-dataset, y must be a dict mapping dataset names to y specs
-        if isinstance(y, dict):
-            y_config = y
-        else:
-            # If y is string or list, apply to all datasets
-            y_config = {dataset_name: y for dataset_name in datasets.keys()}
     else:
         raise ValueError("Data must be either a pandas DataFrame or a dictionary of DataFrames")
     
-    # Normalize y_config to ensure all values are lists
-    facets_per_dataset = {}
-    max_facets = 0
-    
-    for dataset_name, y_spec in y_config.items():
-        if isinstance(y_spec, str):
-            facets_per_dataset[dataset_name] = [y_spec]
-        elif isinstance(y_spec, list):
-            facets_per_dataset[dataset_name] = y_spec
-        else:
-            raise ValueError(f"y specification for dataset '{dataset_name}' must be string or list, got {type(y_spec)}")
-        
-        max_facets = max(max_facets, len(facets_per_dataset[dataset_name]))
-    
     # Validate all datasets have required columns
     for dataset_name, df in datasets.items():
-        required_cols = [x, color, filter] + facets_per_dataset[dataset_name]
+        required_cols = [x, y, color, filter]
+        if facet:
+            required_cols.append(facet)
         missing_cols = [col for col in required_cols if col not in df.columns]
         if missing_cols:
             raise ValueError(f"Dataset '{dataset_name}' missing columns: {missing_cols}")
@@ -69,9 +46,21 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
     all_color_values = set()
     all_filter_values = set()
     
+    # Get facet values per dataset
+    facet_values_per_dataset = {}
+    max_facets = 0
+    
     for dataset_name, df in datasets.items():
         all_color_values.update(df[color].unique())
         all_filter_values.update(df[filter].unique())
+        
+        if facet:
+            dataset_facets = sorted(list(df[facet].unique()))
+            facet_values_per_dataset[dataset_name] = dataset_facets
+            max_facets = max(max_facets, len(dataset_facets))
+        else:
+            facet_values_per_dataset[dataset_name] = [None]
+            max_facets = 1
     
     # Sort for consistency
     all_color_values = sorted(list(all_color_values))
@@ -93,11 +82,12 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
         datasets_json[dataset_name] = df.to_json(orient='records')
     
     color_mapping_json = json.dumps(color_mapping)
-    facets_per_dataset_json = json.dumps(facets_per_dataset)
+    facet_values_per_dataset_json = json.dumps(facet_values_per_dataset)
     
-    # Calculate max subplot layout
-    subplot_cols = min(3, max_facets)
-    subplot_rows = (max_facets + subplot_cols - 1) // subplot_cols
+    # Calculate max subplot layout (will be dynamic based on selected filters)
+    max_filter_values = len(all_filter_values)
+    subplot_cols = max_facets if facet else 1
+    max_subplot_rows = max_filter_values  # Each filter can be a row
     
     # Create the HTML template with embedded JavaScript
     html_template = f"""
@@ -217,9 +207,31 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
         .deselect-all-btn:hover {{
             background: #545b62;
         }}
+        .download-btn {{
+            background: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-bottom: 15px;
+            width: 100%;
+        }}
+        .download-btn:hover {{
+            background: #218838;
+        }}
+        .info-note {{
+            font-size: 12px;
+            color: #666;
+            margin-top: 10px;
+            padding: 8px;
+            background: #e9ecef;
+            border-radius: 4px;
+        }}
         #plotDiv {{
             width: 100%;
-            height: {600 if max_facets == 1 else max(400, 300 * subplot_rows)}px;
+            height: 600px;
         }}
         .tab-content {{
             display: none;
@@ -240,13 +252,19 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
         
         <div class="content-container">
             <div class="controls">
+                <div class="download-section">
+                    <button class="download-btn" onclick="downloadData()">📥 Download Dataset</button>
+                </div>
                 <div class="filter-section">
                     <div class="filter-title">Filter by {filter.title()}</div>
-                    <div style="margin-bottom: 10px;">
+                    <div class="button-group">
                         <button class="select-all-btn" onclick="selectAll()">Select All</button>
                         <button class="deselect-all-btn" onclick="deselectAll()">Deselect All</button>
                     </div>
                     <div id="filterCheckboxes"></div>
+                    <div class="info-note">
+                        <strong>Tip:</strong> Each selected filter creates its own row of plots. All facets for a filter appear horizontally in that row.
+                    </div>
                 </div>
             </div>
             <div class="plot-container">
@@ -260,11 +278,11 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
         const allDatasets = {json.dumps(datasets_json)};
         const filterColumn = '{filter}';
         const xColumn = '{x}';
+        const yColumn = '{y}';
         const colorColumn = '{color}';
-        const facetsPerDataset = {facets_per_dataset_json};
+        const facetColumn = {json.dumps(facet) if facet else 'null'};
         const allFilterValues = {json.dumps(all_filter_values)};
-        const maxSubplotCols = {subplot_cols};
-        const maxSubplotRows = {subplot_rows};
+        const facetValuesPerDataset = {facet_values_per_dataset_json};
         const singleDataset = {json.dumps(single_dataset)};
         const baseTitle = '{title}';
         
@@ -274,7 +292,7 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
         // Current active dataset
         let currentDatasetName = Object.keys(allDatasets)[0];
         let currentData = JSON.parse(allDatasets[currentDatasetName]);
-        let currentFacets = facetsPerDataset[currentDatasetName];
+        let currentFacetValues = facetValuesPerDataset[currentDatasetName];
         
         // Initialize tabs if multiple datasets
         function initializeTabs() {{
@@ -306,7 +324,7 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
             // Update current dataset
             currentDatasetName = datasetName;
             currentData = JSON.parse(allDatasets[datasetName]);
-            currentFacets = facetsPerDataset[datasetName];
+            currentFacetValues = facetValuesPerDataset[datasetName];
             
             // Update filter checkboxes based on current dataset
             updateFilterCheckboxes();
@@ -344,82 +362,146 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
             }});
         }}
         
-        // Group data by color for plotting
-        function groupDataByColor(data) {{
+        // Group data by color, filter, and facet value for plotting
+        function groupDataByColorFilterAndFacet(data, selectedFilters) {{
             const groups = {{}};
             
             data.forEach(row => {{
+                const filterValue = row[filterColumn];
                 const colorValue = row[colorColumn];
+                const facetValue = facetColumn ? row[facetColumn] : 'main';
                 
-                if (!groups[colorValue]) {{
-                    groups[colorValue] = [];
+                // Only include data for selected filters
+                if (!selectedFilters.includes(filterValue)) return;
+                
+                const key = `${{filterValue}}_${{facetValue}}_${{colorValue}}`;
+                
+                if (!groups[key]) {{
+                    groups[key] = {{
+                        filterValue: filterValue,
+                        colorValue: colorValue,
+                        facetValue: facetValue,
+                        data: []
+                    }};
                 }}
-                groups[colorValue].push(row);
+                groups[key].data.push(row);
             }});
             
             return groups;
         }}
         
-        // Create plot traces with multi-column faceting support
-        function createPlotTraces(data) {{
-            const colorGroups = groupDataByColor(data);
+        // Update plot container height dynamically
+        function updatePlotHeight(numRows) {{
+            const plotDiv = document.getElementById('plotDiv');
+            const newHeight = Math.max(500, 350 * numRows);
+            plotDiv.style.height = `${{newHeight}}px`;
+        }}
+        
+        // Create plot traces with filter rows and facet columns
+        function createPlotTraces(data, selectedFilters) {{
+            const groups = groupDataByColorFilterAndFacet(data, selectedFilters);
             const traces = [];
             
-            // Calculate subplot layout for current dataset
-            const numFacets = currentFacets.length;
-            const subplotCols = Math.min(3, numFacets);
-            const subplotRows = Math.ceil(numFacets / subplotCols);
+            // Calculate layout: each filter is a row, each facet is a column
+            const numFilterRows = selectedFilters.length;
+            const numFacetCols = currentFacetValues.length;
             
-            // Create traces for each y-column (facet) and color combination
-            currentFacets.forEach((yColumn, facetIndex) => {{
-                Object.keys(colorGroups).forEach(colorValue => {{
-                    const groupData = colorGroups[colorValue];
+            Object.keys(groups).forEach(key => {{
+                const group = groups[key];
+                const groupData = group.data;
+                
+                // Calculate subplot position
+                const filterRowIndex = selectedFilters.indexOf(group.filterValue);
+                const facetColIndex = currentFacetValues.indexOf(group.facetValue);
+                
+                let xaxis = 'x';
+                let yaxis = 'y';
+                
+                if (numFilterRows > 1 || numFacetCols > 1) {{
+                    // Calculate subplot number (1-indexed)
+                    const subplotNum = filterRowIndex * numFacetCols + facetColIndex + 1;
                     
-                    // Calculate subplot position
-                    let xaxis = 'x';
-                    let yaxis = 'y';
-                    
-                    if (numFacets > 1) {{
-                        const row = Math.floor(facetIndex / subplotCols) + 1;
-                        const col = (facetIndex % subplotCols) + 1;
-                        
-                        if (row > 1 || col > 1) {{
-                            const axisNum = (row - 1) * subplotCols + col;
-                            xaxis = axisNum === 1 ? 'x' : `x${{axisNum}}`;
-                            yaxis = axisNum === 1 ? 'y' : `y${{axisNum}}`;
-                        }}
+                    if (subplotNum > 1) {{
+                        xaxis = `x${{subplotNum}}`;
+                        yaxis = `y${{subplotNum}}`;
                     }}
-                    
-                    const trace = {{
-                        x: groupData.map(row => row[xColumn]),
-                        y: groupData.map(row => row[yColumn]),
-                        mode: 'markers',
-                        type: 'scatter',
-                        name: colorValue,
-                        legendgroup: colorValue,
-                        showlegend: facetIndex === 0, // Only show legend for first facet
-                        xaxis: xaxis,
-                        yaxis: yaxis,
-                        marker: {{
-                            color: colorMap[colorValue],
-                            size: 8,
-                            line: {{
-                                width: 1,
-                                color: 'rgba(0,0,0,0.2)'
-                            }}
-                        }},
-                        hovertemplate: `<b>${{colorValue}}</b><br>` +
-                                      `{x}: %{{x}}<br>` +
-                                      `${{yColumn}}: %{{y}}<br>` +
-                                      `{filter}: %{{customdata[0]}}<br>` +
-                                      '<extra></extra>',
-                        customdata: groupData.map(row => [row[filterColumn]])
-                    }};
-                    traces.push(trace);
-                }});
+                }}
+                
+                // Create unique legend group per filter-color combination
+                const legendGroup = `${{group.filterValue}}_${{group.colorValue}}`;
+                
+                // Only show legend for first facet of each filter-color combination
+                const showLegend = facetColIndex === 0;
+                
+                const trace = {{
+                    x: groupData.map(row => row[xColumn]),
+                    y: groupData.map(row => row[yColumn]),
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: `${{group.filterValue}} - ${{group.colorValue}}`,
+                    legendgroup: legendGroup,
+                    showlegend: showLegend,
+                    xaxis: xaxis,
+                    yaxis: yaxis,
+                    marker: {{
+                        color: colorMap[group.colorValue],
+                        size: 8,
+                        line: {{
+                            width: 1,
+                            color: 'rgba(0,0,0,0.2)'
+                        }}
+                    }},
+                    hovertemplate: `<b>${{group.colorValue}}</b><br>` +
+                                  `{x}: %{{x}}<br>` +
+                                  `{y}: %{{y}}<br>` +
+                                  `{filter}: %{{customdata[0]}}<br>` +
+                                  (facetColumn ? `{facet}: %{{customdata[1]}}<br>` : '') +
+                                  '<extra></extra>',
+                    customdata: groupData.map(row => facetColumn ? 
+                        [row[filterColumn], row[facetColumn]] : [row[filterColumn]])
+                }};
+                traces.push(trace);
             }});
             
             return traces;
+        }}
+        
+        // Download data functionality
+        function downloadData() {{
+            const currentDatasetData = currentData;
+            const datasetName = currentDatasetName;
+            
+            // Convert to CSV
+            if (currentDatasetData.length === 0) {{
+                alert('No data available to download');
+                return;
+            }}
+            
+            const headers = Object.keys(currentDatasetData[0]);
+            const csvContent = [
+                headers.join(','),
+                ...currentDatasetData.map(row => 
+                    headers.map(header => {{
+                        const value = row[header];
+                        // Handle values that might contain commas or quotes
+                        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {{
+                            return `"${{value.replace(/"/g, '""')}}"`;
+                        }}
+                        return value;
+                    }}).join(',')
+                )
+            ].join('\\n');
+            
+            // Create and trigger download
+            const blob = new Blob([csvContent], {{ type: 'text/csv;charset=utf-8;' }});
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `${{datasetName}}_data.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
         }}
         
         // Update plot based on selected filters
@@ -436,72 +518,112 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                 }}
             }});
             
-            // Filter data
-            const filteredData = currentData.filter(row => 
-                selectedFilters.includes(row[filterColumn])
-            );
+            if (selectedFilters.length === 0) {{
+                // Clear plot if no filters selected
+                updatePlotHeight(1);
+                Plotly.newPlot('plotDiv', [], {{title: 'Select at least one filter option'}});
+                return;
+            }}
+            
+            // Calculate number of rows for height adjustment
+            const numFilterRows = selectedFilters.length;
+            updatePlotHeight(numFilterRows);
             
             // Create new traces
-            const traces = createPlotTraces(filteredData);
+            const traces = createPlotTraces(currentData, selectedFilters);
             
             // Create dynamic title
             const plotTitle = singleDataset ? baseTitle : `${{baseTitle}} - ${{currentDatasetName}}`;
             
-            // Calculate subplot layout for current dataset
-            const numFacets = currentFacets.length;
-            const subplotCols = Math.min(3, numFacets);
-            const subplotRows = Math.ceil(numFacets / subplotCols);
+            // Calculate subplot layout
+            const numFacetCols = currentFacetValues.length;
             
-            // Create layout with subplots if multi-column faceting
+            // Create layout with subplots
             let layout = {{
                 title: plotTitle,
                 hovermode: 'closest',
-                showlegend: true
+                showlegend: true,
+                height: Math.max(400, 300 * numFilterRows)
             }};
             
-            if (numFacets > 1) {{
-                // Create subplot layout based on current dataset's facet columns
+            if (numFilterRows > 1 || numFacetCols > 1) {{
+                // Create subplot specifications
+                const subplotSpecs = [];
+                for (let row = 0; row < numFilterRows; row++) {{
+                    const rowSpecs = [];
+                    for (let col = 0; col < numFacetCols; col++) {{
+                        rowSpecs.push({{}});
+                    }}
+                    subplotSpecs.push(rowSpecs);
+                }}
+                
                 layout.grid = {{
-                    rows: subplotRows,
-                    columns: subplotCols,
-                    pattern: 'independent'
+                    rows: numFilterRows,
+                    columns: numFacetCols,
+                    pattern: 'independent',
+                    roworder: 'top to bottom'
                 }};
                 
-                // Add axis labels for each subplot
-                currentFacets.forEach((yColumn, index) => {{
-                    const row = Math.floor(index / subplotCols) + 1;
-                    const col = (index % subplotCols) + 1;
+                // Add axis labels and titles for each subplot
+                let subplotCounter = 1;
+                for (let filterIdx = 0; filterIdx < selectedFilters.length; filterIdx++) {{
+                    const filterValue = selectedFilters[filterIdx];
                     
-                    const axisNum = (row - 1) * subplotCols + col;
-                    let xaxisKey = axisNum === 1 ? 'xaxis' : `xaxis${{axisNum}}`;
-                    let yaxisKey = axisNum === 1 ? 'yaxis' : `yaxis${{axisNum}}`;
-                    
-                    layout[xaxisKey] = {{
-                        title: row === subplotRows ? '{x}' : '',
-                        anchor: yaxisKey.replace('yaxis', 'y')
-                    }};
-                    layout[yaxisKey] = {{
-                        title: col === 1 ? yColumn : '',
-                        anchor: xaxisKey.replace('xaxis', 'x')
-                    }};
-                    
-                    // Add subplot titles
-                    if (!layout.annotations) layout.annotations = [];
-                    layout.annotations.push({{
-                        text: yColumn,
-                        showarrow: false,
-                        x: (col - 0.5) / subplotCols,
-                        y: 1 - (row - 1) / subplotRows + 0.02,
-                        xref: 'paper',
-                        yref: 'paper',
-                        xanchor: 'center',
-                        yanchor: 'bottom',
-                        font: {{ size: 14, color: '#333', weight: 'bold' }}
-                    }});
-                }});
+                    for (let facetIdx = 0; facetIdx < currentFacetValues.length; facetIdx++) {{
+                        const facetValue = currentFacetValues[facetIdx];
+                        
+                        let xaxisKey = subplotCounter === 1 ? 'xaxis' : `xaxis${{subplotCounter}}`;
+                        let yaxisKey = subplotCounter === 1 ? 'yaxis' : `yaxis${{subplotCounter}}`;
+                        
+                        layout[xaxisKey] = {{
+                            title: filterIdx === selectedFilters.length - 1 ? '{x}' : '',
+                            anchor: yaxisKey.replace('yaxis', 'y')
+                        }};
+                        layout[yaxisKey] = {{
+                            title: facetIdx === 0 ? '{y}' : '',
+                            anchor: xaxisKey.replace('xaxis', 'x')
+                        }};
+                        
+                        // Add subplot titles
+                        if (!layout.annotations) layout.annotations = [];
+                        
+                        // Filter title (left side of row)
+                        if (facetIdx === 0) {{
+                            layout.annotations.push({{
+                                text: `<b>{filter}: ${{filterValue}}</b>`,
+                                showarrow: false,
+                                x: -0.02,
+                                y: 1 - (filterIdx + 0.5) / numFilterRows,
+                                xref: 'paper',
+                                yref: 'paper',
+                                xanchor: 'right',
+                                yanchor: 'middle',
+                                font: {{ size: 12, color: '#333' }},
+                                textangle: -90
+                            }});
+                        }}
+                        
+                        // Facet title (top of column)
+                        if (facetColumn && filterIdx === 0) {{
+                            layout.annotations.push({{
+                                text: `{facet or 'Facet'}: ${{facetValue}}`,
+                                showarrow: false,
+                                x: (facetIdx + 0.5) / numFacetCols,
+                                y: 1.02,
+                                xref: 'paper',
+                                yref: 'paper',
+                                xanchor: 'center',
+                                yanchor: 'bottom',
+                                font: {{ size: 12, color: '#333' }}
+                            }});
+                        }}
+                        
+                        subplotCounter++;
+                    }}
+                }}
             }} else {{
                 layout.xaxis = {{ title: '{x}' }};
-                layout.yaxis = {{ title: currentFacets[0] }};
+                layout.yaxis = {{ title: '{y}' }};
             }}
             
             // Update plot
@@ -546,40 +668,37 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
 
 # Example usage and demo
 if __name__ == "__main__":
-    # Create sample data for multiple datasets with multiple numeric columns
+    # Create sample data for multiple datasets
     np.random.seed(42)
     
-    # Dataset 1: Stock data with multiple metrics
+    # Dataset 1: Stock prices (has Tech and Finance categories)
     dates1 = pd.date_range('2023-01-01', periods=100)
     stock_data = {
         'date': dates1,
         'price': np.random.normal(100, 15, 100) + np.random.normal(0, 3, 100).cumsum(),
-        'volume': np.random.normal(1000000, 200000, 100),
-        'market_cap': np.random.normal(50000000, 10000000, 100),
         'quality': np.random.choice(['High', 'Medium', 'Low'], 100),
         'location': np.random.choice(['New York', 'London', 'Tokyo'], 100),
+        'category': np.random.choice(['Tech', 'Finance'], 100)
     }
     
-    # Dataset 2: Crypto data with different metrics
+    # Dataset 2: Crypto prices (has Tech, Finance, and DeFi categories)
     dates2 = pd.date_range('2023-01-01', periods=120)
     crypto_data = {
         'date': dates2,
         'price': np.random.normal(50, 20, 120) + np.random.normal(0, 8, 120).cumsum(),
-        'volume': np.random.normal(500000, 100000, 120),
-        'market_cap': np.random.normal(25000000, 5000000, 120),
-        'volatility': np.random.normal(0.05, 0.02, 120),
         'quality': np.random.choice(['High', 'Medium', 'Low'], 120),
         'location': np.random.choice(['New York', 'London', 'Tokyo', 'Seoul'], 120),
+        'category': np.random.choice(['Tech', 'Finance', 'DeFi'], 120)
     }
     
-    # Dataset 3: Commodity data with limited metrics
+    # Dataset 3: Commodity prices (has only Energy and Metals categories)
     dates3 = pd.date_range('2023-01-01', periods=80)
     commodity_data = {
         'date': dates3,
         'price': np.random.normal(200, 25, 80) + np.random.normal(0, 4, 80).cumsum(),
-        'volume': np.random.normal(2000000, 400000, 80),
         'quality': np.random.choice(['High', 'Medium', 'Low'], 80),
         'location': np.random.choice(['New York', 'London', 'Singapore'], 80),
+        'category': np.random.choice(['Energy', 'Metals'], 80)  # Different categories!
     }
     
     # Create DataFrames
@@ -589,60 +708,30 @@ if __name__ == "__main__":
         'Commodities': pd.DataFrame(commodity_data)
     }
     
-    # EXAMPLE 1: Multi-dataset with different y configurations per dataset
-    print("=== EXAMPLE 1: Multi-dataset with custom y per dataset ===")
+    # Create multi-dataset plot with filter rows and facet columns
     superPlotter(datasets, 
                 x="date", 
-                y={
-                    'Stocks': ['price', 'volume', 'market_cap'],       # 3 subplots
-                    'Crypto': ['price', 'volume', 'volatility'],      # 3 subplots (no market_cap)
-                    'Commodities': ['price', 'volume']                # 2 subplots only
-                },
+                y="price", 
                 color="quality", 
                 filter="location",
-                title="Custom Multi-Metric Dashboard",
-                output_file="custom_multi_dataset_demo.html")
+                facet="category",
+                title="Market Analysis Dashboard",
+                output_file="filter_rows_demo.html")
     
-    # EXAMPLE 2: Multi-dataset with same y configuration for all
-    print("\n=== EXAMPLE 2: Multi-dataset with same y for all ===")
-    superPlotter(datasets, 
-                x="date", 
-                y=['price', 'volume'],  # Apply to all datasets
-                color="quality", 
-                filter="location",
-                title="Unified Multi-Dataset Dashboard",
-                output_file="unified_multi_dataset_demo.html")
+    print("Filter rows demo complete! Open 'filter_rows_demo.html' in your browser.")
+    print("Now each selected filter creates its own row:")
+    print("- Select New York + London = 2 rows")
+    print("- Each row shows all facets (categories) horizontally")
+    print("- Legend groups by filter-color combination")
     
-    # EXAMPLE 3: Single dataset with multiple y columns (faceting)
-    print("\n=== EXAMPLE 3: Single dataset with faceting ===")
+    # Also create a single dataset example for comparison
     superPlotter(datasets['Stocks'], 
                 x="date", 
-                y=['price', 'volume', 'market_cap'],  # List creates facets
+                y="price", 
                 color="quality", 
                 filter="location",
-                title="Stock Analysis Dashboard",
-                output_file="single_dataset_faceted_demo.html")
+                facet="category",
+                title="Single Dataset - Filter Rows",
+                output_file="single_filter_rows_demo.html")
     
-    # EXAMPLE 4: Single dataset with single y column (traditional plot)
-    print("\n=== EXAMPLE 4: Single dataset traditional plot ===")
-    superPlotter(datasets['Stocks'], 
-                x="date", 
-                y="price",  # String creates single plot
-                color="quality", 
-                filter="location",
-                title="Simple Stock Price Plot",
-                output_file="single_dataset_simple_demo.html")
-    
-    print("\n" + "="*60)
-    print("ALL DEMOS COMPLETE!")
-    print("="*60)
-    print("Generated files:")
-    print("1. custom_multi_dataset_demo.html    - Different y configs per dataset")
-    print("2. unified_multi_dataset_demo.html   - Same y config for all datasets") 
-    print("3. single_dataset_faceted_demo.html  - Single dataset with faceting")
-    print("4. single_dataset_simple_demo.html   - Traditional single plot")
-    print("\nKey improvements:")
-    print("- No more separate 'facets' parameter")
-    print("- y can be string, list, or dict")
-    print("- Much more intuitive interface")
-    print("- Flexible per-dataset configuration")
+    print("Single dataset demo complete! Open 'single_filter_rows_demo.html' in your browser.")
