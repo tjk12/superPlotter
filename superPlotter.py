@@ -10,7 +10,7 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                 filter_descriptions=None):
     """
     Create an enhanced Plotly line plot with custom checkbox filtering, multiple y-axis support,
-    and interactive data tables with pivot functionality.
+    and interactive data tables with pivot functionality and column-specific aggregation.
     Now supports multiple datasets with tabbed interface and dynamic y-axis plotting per dataset!
     Each selected filter option creates its own row of subplots.
     
@@ -409,6 +409,54 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
             display: block;
         }}
         
+        /* NEW: Column-specific aggregation styles */
+        .column-aggregation-container {{
+            background: #f1f3f4;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }}
+        .column-aggregation-title {{
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 14px;
+        }}
+        .column-agg-row {{
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            gap: 10px;
+        }}
+        .column-name {{
+            font-weight: 500;
+            color: #555;
+            min-width: 120px;
+            font-size: 13px;
+        }}
+        .column-agg-select {{
+            flex: 1;
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 12px;
+            background: white;
+        }}
+        .reset-agg-btn {{
+            background: #ffc107;
+            color: #212529;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            margin-left: 10px;
+        }}
+        .reset-agg-btn:hover {{
+            background: #e0a800;
+        }}
+        
     </style>
 </head>
 <body>
@@ -455,25 +503,18 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                         <div class="pivot-controls">
                             <div class="control-row">
                                 <div class="control-column">
-                                    <label class="control-label">Group By (Rows)</label>
-                                    <select id="groupBySelect" class="control-select">
+                                    <label class="control-label">Group By (Hold Ctrl for multiple)</label>
+                                    <select id="groupBySelect" class="control-select" multiple style="height: 80px;">
                                         <option value="">No Grouping</option>
                                     </select>
                                 </div>
                                 <div class="control-column">
-                                    <label class="control-label">Aggregate Function</label>
-                                    <select id="aggregateSelect" class="control-select">
-                                        <option value="sum">Sum</option>
-                                        <option value="mean">Average</option>
-                                        <option value="count">Count</option>
-                                        <option value="min">Minimum</option>
-                                        <option value="max">Maximum</option>
-                                        <option value="none">No Aggregation</option>
-                                    </select>
+                                    <button class="apply-btn" onclick="updateTable()" style="height: 80px;">Apply Grouping & Aggregation</button>
                                 </div>
-                                <div class="control-column">
-                                    <label class="control-label">&nbsp;</label>
-                                    <button class="apply-btn" onclick="updateTable()">Apply</button>
+                            </div>
+                            <div id="aggregationControls" style="margin-top: 15px; display: none;">
+                                <div class="control-label">Column-Specific Aggregation Functions</div>
+                                <div id="columnAggregationContainer" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; padding: 10px; border-radius: 4px; background: #f9f9f9;">
                                 </div>
                             </div>
                         </div>
@@ -511,6 +552,9 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
         let currentYColumns = yColumnsPerDataset[currentDatasetName];
         let currentView = 'plot';
         
+        // NEW: Column-specific aggregation settings
+        let columnAggregations = {{}};
+        
         // Initialize tabs if multiple datasets
         function initializeTabs() {{
             if (singleDataset) return;
@@ -528,34 +572,36 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
             }});
         }}
         
-// Make sure to call updateGroupByOptions when switching datasets
-function switchDataset(datasetName) {{
-    // Update active tab
-    document.querySelectorAll('.tab').forEach(tab => {{
-        tab.classList.remove('active');
-        if (tab.textContent === datasetName) {{
-            tab.classList.add('active');
+        function switchDataset(datasetName) {{
+            // Update active tab
+            document.querySelectorAll('.tab').forEach(tab => {{
+                tab.classList.remove('active');
+                if (tab.textContent === datasetName) {{
+                    tab.classList.add('active');
+                }}
+            }});
+            
+            // Update current dataset
+            currentDatasetName = datasetName;
+            currentData = JSON.parse(allDatasets[datasetName]);
+            currentYColumns = yColumnsPerDataset[datasetName];
+            
+            // Reset column aggregations for new dataset
+            columnAggregations = {{}};
+            
+            // Update filter checkboxes based on current dataset
+            updateFilterCheckboxes();
+            
+            // Update group by options for new dataset
+            updateGroupByOptions();
+            
+            // Update column aggregation controls
+            updateColumnAggregationControls();
+            
+            // Immediately update both views
+            updatePlot();
+            updateTable();
         }}
-    }});
-    
-    // Update current dataset
-    currentDatasetName = datasetName;
-    currentData = JSON.parse(allDatasets[datasetName]);
-    currentYColumns = yColumnsPerDataset[datasetName];
-    
-    // Update filter checkboxes based on current dataset
-    updateFilterCheckboxes();
-    
-    // IMPORTANT: Update group by options for new dataset
-    updateGroupByOptions();
-    
-    // Update current view
-    if (currentView === 'plot') {{
-        updatePlot();
-    }} else {{
-        updateTable();
-    }}
-}}
         
         // Switch between views
         function switchView(viewName) {{
@@ -587,7 +633,80 @@ function switchDataset(datasetName) {{
             }}
         }}
         
-
+        // NEW: Update column aggregation controls
+        function updateColumnAggregationControls() {{
+            const container = document.getElementById('columnAggregationControls');
+            container.innerHTML = '';
+            
+            if (currentData.length === 0) return;
+            
+            // Get all numeric columns
+            const allColumns = Object.keys(currentData[0]);
+            const numericColumns = allColumns.filter(col => {{
+                const sampleValues = currentData.slice(0, 10).map(row => row[col]);
+                return sampleValues.some(val => 
+                    val !== null && val !== undefined && val !== '' && 
+                    !isNaN(parseFloat(val)) && isFinite(val)
+                );
+            }});
+            
+            // Create controls for each numeric column
+            numericColumns.forEach(col => {{
+                const row = document.createElement('div');
+                row.className = 'column-agg-row';
+                
+                const label = document.createElement('div');
+                label.className = 'column-name';
+                label.textContent = col;
+                
+                const select = document.createElement('select');
+                select.className = 'column-agg-select';
+                select.id = `agg_${{col}}`;
+                
+                // Add options
+                const options = [
+                    {{value: '', text: 'Use Default'}},
+                    {{value: 'sum', text: 'Sum'}},
+                    {{value: 'mean', text: 'Average'}},
+                    {{value: 'count', text: 'Count'}},
+                    {{value: 'min', text: 'Minimum'}},
+                    {{value: 'max', text: 'Maximum'}},
+                    {{value: 'first', text: 'First Value'}},
+                    {{value: 'last', text: 'Last Value'}}
+                ];
+                
+                options.forEach(opt => {{
+                    const option = document.createElement('option');
+                    option.value = opt.value;
+                    option.textContent = opt.text;
+                    select.appendChild(option);
+                }});
+                
+                // Set current value if exists
+                if (columnAggregations[col]) {{
+                    select.value = columnAggregations[col];
+                }}
+                
+                // Add change handler
+                select.addEventListener('change', () => {{
+                    if (select.value === '') {{
+                        delete columnAggregations[col];
+                    }} else {{
+                        columnAggregations[col] = select.value;
+                    }}
+                }});
+                
+                row.appendChild(label);
+                row.appendChild(select);
+                container.appendChild(row);
+            }});
+        }}
+        
+        // NEW: Reset column aggregations
+        function resetColumnAggregations() {{
+            columnAggregations = {{}};
+            updateColumnAggregationControls();
+        }}
 
         // ENHANCED: Add year extraction to filtered data
         function getFilteredDataWithYear() {{
@@ -640,10 +759,76 @@ function switchDataset(datasetName) {{
             return date.getFullYear();
         }}
 
-        // ENHANCED: Update group by options with Year extraction from date column
+
+        // Updated updateAggregationControls to only show numeric columns
+        function updateAggregationControls() {{
+            const groupBySelect = document.getElementById('groupBySelect');
+            const aggregationControls = document.getElementById('aggregationControls');
+            const container = document.getElementById('columnAggregationContainer');
+            
+            const selectedGroupColumns = Array.from(groupBySelect.selectedOptions).map(option => option.value);
+            
+            if (selectedGroupColumns.length === 0) {{
+                aggregationControls.style.display = 'none';
+                return;
+            }}
+            
+            aggregationControls.style.display = 'block';
+            container.innerHTML = '';
+            
+            // Get only numeric columns that are not grouping columns
+            if (currentData.length > 0) {{
+                const numericColumns = getNumericColumns(currentData);
+                const nonGroupingNumericColumns = numericColumns.filter(col => !selectedGroupColumns.includes(col));
+                
+                nonGroupingNumericColumns.forEach(col => {{
+                    const controlDiv = document.createElement('div');
+                    controlDiv.style.cssText = 'margin-bottom: 10px; display: flex; align-items: center; gap: 10px;';
+                    
+                    const label = document.createElement('label');
+                    label.textContent = col;
+                    label.style.cssText = 'min-width: 120px; font-weight: 500;';
+                    
+                    const select = document.createElement('select');
+                    select.id = `agg_${{col}}`;
+                    select.className = 'control-select';
+                    select.style.cssText = 'flex: 1; max-width: 150px;';
+                    
+                    // Add numeric aggregation options only
+                    const numericOptions = [
+                        {{value: 'sum', text: 'Sum'}},
+                        {{value: 'mean', text: 'Average'}},
+                        {{value: 'count', text: 'Count'}},
+                        {{value: 'min', text: 'Minimum'}},
+                        {{value: 'max', text: 'Maximum'}},
+                        {{value: 'first', text: 'First Value'}},
+                        {{value: 'last', text: 'Last Value'}}
+                    ];
+                    
+                    numericOptions.forEach(opt => {{
+                        const option = document.createElement('option');
+                        option.value = opt.value;
+                        option.textContent = opt.text;
+                        if (opt.value === 'sum') option.selected = true; // Default for numeric
+                        select.appendChild(option);
+                    }});
+                    
+                    const typeLabel = document.createElement('span');
+                    typeLabel.textContent = '(numeric)';
+                    typeLabel.style.cssText = 'font-size: 11px; color: #666; font-style: italic;';
+                    
+                    controlDiv.appendChild(label);
+                    controlDiv.appendChild(select);
+                    controlDiv.appendChild(typeLabel);
+                    container.appendChild(controlDiv);
+                }});
+            }}
+        }}
+
+        // Replace the updateGroupByOptions function
         function updateGroupByOptions() {{
             const groupBySelect = document.getElementById('groupBySelect');
-            groupBySelect.innerHTML = '<option value="">No Grouping</option>';
+            groupBySelect.innerHTML = '';
             
             // Get all column names from current dataset
             if (currentData.length > 0) {{
@@ -665,6 +850,11 @@ function switchDataset(datasetName) {{
                     groupBySelect.appendChild(yearOption);
                 }}
             }}
+            
+            // Add event listener for multi-select changes
+            groupBySelect.addEventListener('change', function() {{
+                updateAggregationControls();
+            }});
         }}
         
         // Get filtered data based on current filter selections
@@ -685,12 +875,35 @@ function switchDataset(datasetName) {{
             
             return currentData.filter(row => selectedFilters.includes(row[filterColumn]));
         }}
-        
-        // ENHANCED: Modified updateTable to use the new data function
+                
+
+
+
+        // Updated helper function to identify numeric columns only
+        function getNumericColumns(data) {{
+            if (!data || data.length === 0) return [];
+            
+            const allColumns = Object.keys(data[0]);
+            return allColumns.filter(col => {{
+                const sampleValues = data.slice(0, 100).map(row => row[col])
+                    .filter(val => val !== null && val !== undefined && val !== '');
+                
+                // Check if at least 80% of non-null values are numeric
+                if (sampleValues.length === 0) return false;
+                
+                const numericCount = sampleValues.filter(val => 
+                    !isNaN(parseFloat(val)) && isFinite(val)
+                ).length;
+                
+                return (numericCount / sampleValues.length) >= 0.8;
+            }});
+        }}
+
+        // Updated updateTable function to only show numeric columns
         function updateTable() {{
-            const filteredData = getFilteredDataWithYear(); // Use enhanced function
-            const groupBy = document.getElementById('groupBySelect').value;
-            const aggregateFunc = document.getElementById('aggregateSelect').value;
+            const filteredData = getFilteredDataWithYear();
+            const groupBySelect = document.getElementById('groupBySelect');
+            const selectedGroupColumns = Array.from(groupBySelect.selectedOptions).map(option => option.value);
             
             const tableHead = document.getElementById('tableHead');
             const tableBody = document.getElementById('tableBody');
@@ -703,15 +916,34 @@ function switchDataset(datasetName) {{
                 return;
             }}
             
-            let tableData = [...filteredData]; // Create a copy
-            let columns = Object.keys(tableData[0]);
+            let tableData = [...filteredData];
+            
+            // Get numeric columns only, plus grouping columns
+            const numericColumns = getNumericColumns(tableData);
+            const allColumns = Object.keys(tableData[0]);
+            
+            // Include grouping columns even if they're not numeric
+            let displayColumns = [...new Set([...selectedGroupColumns, ...numericColumns])];
             
             // Apply grouping and aggregation if specified
-            if (groupBy && groupBy !== '' && aggregateFunc !== 'none') {{
+            if (selectedGroupColumns.length > 0) {{
                 try {{
-                    tableData = performAggregation(filteredData, groupBy, aggregateFunc);
+                    // Get column-specific aggregation functions
+                    const columnAggregations = {{}};
+                    numericColumns.forEach(col => {{
+                        if (!selectedGroupColumns.includes(col)) {{
+                            const selectElement = document.getElementById(`agg_${{col}}`);
+                            if (selectElement) {{
+                                columnAggregations[col] = selectElement.value;
+                            }}
+                        }}
+                    }});
+                    
+                    tableData = performAggregation(filteredData, selectedGroupColumns, columnAggregations);
                     if (tableData.length > 0) {{
-                        columns = Object.keys(tableData[0]);
+                        // After aggregation, still only show numeric + grouping columns
+                        const aggregatedNumericColumns = getNumericColumns(tableData);
+                        displayColumns = [...new Set([...selectedGroupColumns, ...aggregatedNumericColumns])];
                     }}
                 }} catch (error) {{
                     console.error('Error in aggregation:', error);
@@ -720,14 +952,22 @@ function switchDataset(datasetName) {{
                 }}
             }}
             
+            // Filter tableData to only include display columns
+            tableData = tableData.map(row => {{
+                const filteredRow = {{}};
+                displayColumns.forEach(col => {{
+                    filteredRow[col] = row[col];
+                }});
+                return filteredRow;
+            }});
+            
             // Create table header
             const headerRow = document.createElement('tr');
-            columns.forEach(col => {{
+            displayColumns.forEach(col => {{
                 const th = document.createElement('th');
                 th.textContent = col;
                 th.style.cursor = 'pointer';
                 th.title = 'Click to sort';
-                // Add click handler for sorting
                 th.onclick = () => sortTable(col);
                 headerRow.appendChild(th);
             }});
@@ -739,7 +979,7 @@ function switchDataset(datasetName) {{
             
             tableData.forEach((row, index) => {{
                 const tr = document.createElement('tr');
-                columns.forEach(col => {{
+                displayColumns.forEach(col => {{
                     const td = document.createElement('td');
                     const value = row[col];
                     
@@ -766,29 +1006,32 @@ function switchDataset(datasetName) {{
             }});
             
             // Update table stats
-            let statsText = `Showing ${{tableData.length}} rows`;
-            if (groupBy && groupBy !== '' && aggregateFunc !== 'none') {{
-                const groupLabel = groupBy === 'Year' ? 'Year (from date)' : groupBy;
-                statsText += ` (grouped by "${{groupLabel}}" using ${{aggregateFunc}})`;
+            let statsText = `Showing ${{tableData.length}} rows (numeric columns only)`;
+            if (selectedGroupColumns.length > 0) {{
+                const groupLabels = selectedGroupColumns.map(col => 
+                    col === 'Year' ? 'Year (from date)' : col
+                );
+                statsText += ` (grouped by: ${{groupLabels.join(', ')}})`;
             }}
             if (filteredData.length !== currentData.length) {{
                 statsText += ` of ${{currentData.length}} total records`;
             }}
             tableStats.innerHTML = statsText;
         }}
-        
 
 
 
-        // ENHANCED: Modified performAggregation to handle Year grouping
-        function performAggregation(data, groupBy, aggregateFunc) {{
-            if (!groupBy || groupBy === '' || aggregateFunc === 'none') {{
+
+
+        // Updated performAggregation to handle only numeric columns for aggregation
+        function performAggregation(data, groupByColumns, columnAggregations) {{
+            if (!groupByColumns || groupByColumns.length === 0) {{
                 return data;
             }}
             
             // If grouping by Year, ensure Year column exists in data
             let processedData = data;
-            if (groupBy === 'Year') {{
+            if (groupByColumns.includes('Year')) {{
                 processedData = data.map(row => {{
                     const newRow = {{ ...row }};
                     if (!newRow.Year && row[xColumn]) {{
@@ -798,96 +1041,119 @@ function switchDataset(datasetName) {{
                 }});
             }}
             
-            // Group data by the groupBy column
+            // Group data by the groupBy columns
             const groups = {{}};
             processedData.forEach(row => {{
-                let key = row[groupBy];
+                // Create composite key from all grouping columns
+                const keyParts = groupByColumns.map(col => {{
+                    let value = row[col];
+                    
+                    // Handle null/undefined years
+                    if (col === 'Year' && (value === null || value === undefined)) {{
+                        value = 'Unknown Year';
+                    }}
+                    
+                    return String(value || 'null');
+                }});
                 
-                // Handle null/undefined years
-                if (groupBy === 'Year' && (key === null || key === undefined)) {{
-                    key = 'Unknown Year';
-                }}
-                
-                key = String(key); // Convert to string for consistent keys
+                const key = keyParts.join('|||'); // Use separator that won't appear in data
                 
                 if (!groups[key]) {{
-                    groups[key] = [];
+                    groups[key] = {{
+                        keyValues: keyParts,
+                        rows: []
+                    }};
                 }}
-                groups[key].push(row);
+                groups[key].rows.push(row);
             }});
             
             // Aggregate each group
             const aggregated = [];
             
-            // Sort keys - for years, sort numerically
-            const sortedKeys = Object.keys(groups).sort((a, b) => {{
-                if (groupBy === 'Year') {{
-                    const yearA = a === 'Unknown Year' ? Infinity : parseInt(a);
-                    const yearB = b === 'Unknown Year' ? Infinity : parseInt(b);
-                    return yearA - yearB;
-                }} else {{
-                    return a.localeCompare(b);
+            // Sort groups by their key values
+            const sortedGroupKeys = Object.keys(groups).sort((a, b) => {{
+                const groupA = groups[a].keyValues;
+                const groupB = groups[b].keyValues;
+                
+                // Compare each key part
+                for (let i = 0; i < Math.min(groupA.length, groupB.length); i++) {{
+                    const col = groupByColumns[i];
+                    let valA = groupA[i];
+                    let valB = groupB[i];
+                    
+                    // Special handling for Year sorting
+                    if (col === 'Year') {{
+                        const yearA = valA === 'Unknown Year' ? Infinity : parseInt(valA);
+                        const yearB = valB === 'Unknown Year' ? Infinity : parseInt(valB);
+                        if (yearA !== yearB) return yearA - yearB;
+                    }} else {{
+                        const comparison = valA.localeCompare(valB);
+                        if (comparison !== 0) return comparison;
+                    }}
                 }}
+                return 0;
             }});
             
-            sortedKeys.forEach(key => {{
+            sortedGroupKeys.forEach(key => {{
                 const group = groups[key];
                 const aggregatedRow = {{}};
                 
-                // Set the grouping column value
-                if (groupBy === 'Year' && key !== 'Unknown Year') {{
-                    aggregatedRow[groupBy] = parseInt(key);
-                }} else {{
-                    aggregatedRow[groupBy] = key;
-                }}
+                // Set the grouping column values
+                groupByColumns.forEach((col, index) => {{
+                    const value = group.keyValues[index];
+                    if (col === 'Year' && value !== 'Unknown Year') {{
+                        aggregatedRow[col] = parseInt(value);
+                    }} else {{
+                        aggregatedRow[col] = value === 'null' ? null : value;
+                    }}
+                }});
                 
-                // Get all columns from the first row
-                const allColumns = Object.keys(group[0]);
+                // Get only numeric columns from the first row for aggregation
+                const numericColumns = getNumericColumns(group.rows);
                 
-                allColumns.forEach(col => {{
-                    if (col === groupBy) return; // Skip the grouping column
+                numericColumns.forEach(col => {{
+                    if (groupByColumns.includes(col)) return; // Skip the grouping columns
+                    
+                    // Get aggregation function for this column
+                    const aggFunc = columnAggregations[col] || 'sum'; // Default to sum for numeric
                     
                     // Get all values for this column in the group
-                    const allValues = group.map(row => row[col]);
+                    const allValues = group.rows.map(row => row[col]);
                     const numericValues = allValues.filter(val => {{
                         return val !== null && val !== undefined && val !== '' && 
                             !isNaN(parseFloat(val)) && isFinite(val);
                     }}).map(val => parseFloat(val));
                     
-                    // Apply aggregation function
-                    if (numericValues.length > 0) {{
-                        switch (aggregateFunc) {{
-                            case 'sum':
-                                aggregatedRow[col] = numericValues.reduce((a, b) => a + b, 0);
-                                break;
-                            case 'mean':
-                                aggregatedRow[col] = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
-                                break;
-                            case 'count':
-                                aggregatedRow[col] = numericValues.length;
-                                break;
-                            case 'min':
-                                aggregatedRow[col] = Math.min(...numericValues);
-                                break;
-                            case 'max':
-                                aggregatedRow[col] = Math.max(...numericValues);
-                                break;
-                            default:
-                                aggregatedRow[col] = numericValues[0];
-                        }}
-                    }} else {{
-                        // For non-numeric columns
-                        if (aggregateFunc === 'count') {{
-                            aggregatedRow[col] = allValues.filter(val => 
-                                val !== null && val !== undefined && val !== ''
-                            ).length;
-                        }} else {{
-                            // Take the first non-null value
-                            const firstValidValue = allValues.find(val => 
-                                val !== null && val !== undefined && val !== ''
-                            );
-                            aggregatedRow[col] = firstValidValue || '';
-                        }}
+                    // Apply aggregation function (all numeric)
+                    switch (aggFunc) {{
+                        case 'sum':
+                            aggregatedRow[col] = numericValues.length > 0 ? 
+                                numericValues.reduce((a, b) => a + b, 0) : null;
+                            break;
+                        case 'mean':
+                            aggregatedRow[col] = numericValues.length > 0 ? 
+                                numericValues.reduce((a, b) => a + b, 0) / numericValues.length : null;
+                            break;
+                        case 'count':
+                            aggregatedRow[col] = numericValues.length;
+                            break;
+                        case 'min':
+                            aggregatedRow[col] = numericValues.length > 0 ? 
+                                Math.min(...numericValues) : null;
+                            break;
+                        case 'max':
+                            aggregatedRow[col] = numericValues.length > 0 ? 
+                                Math.max(...numericValues) : null;
+                            break;
+                        case 'first':
+                            aggregatedRow[col] = numericValues.length > 0 ? numericValues[0] : null;
+                            break;
+                        case 'last':
+                            aggregatedRow[col] = numericValues.length > 0 ? 
+                                numericValues[numericValues.length - 1] : null;
+                            break;
+                        default:
+                            aggregatedRow[col] = numericValues.length > 0 ? numericValues[0] : null;
                     }}
                 }});
                 
@@ -1093,7 +1359,6 @@ function switchDataset(datasetName) {{
             return traces;
         }}
 
-    // FIXED: Updated updatePlot function with corrected axis configuration
     function updatePlot() {{
         const selectedFilters = [];
         
@@ -1118,7 +1383,7 @@ function switchDataset(datasetName) {{
         const numFilterRows = selectedFilters.length;
         updatePlotHeight(numFilterRows);
         
-        // Create new traces
+        // Create new traces using current dataset
         const traces = createPlotTraces(currentData, selectedFilters);
         
         // Create dynamic title
