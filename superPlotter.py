@@ -253,7 +253,7 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
         <div class="content-container">
             <div class="controls">
                 <div class="download-section">
-                    <button class="download-btn" onclick="downloadData()">📥 Download Dataset</button>
+                    <button class="download-btn" onclick="downloadData()">Download Dataset</button>
                 </div>
                 <div class="filter-section">
                     <div class="filter-title">Filter by {filter.title()}</div>
