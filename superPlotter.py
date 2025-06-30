@@ -9,7 +9,8 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                 title="Interactive Line Plot", output_file="interactive_plot.html",
                 filter_descriptions=None):
     """
-    Create an enhanced Plotly line plot with custom checkbox filtering and multiple y-axis support.
+    Create an enhanced Plotly line plot with custom checkbox filtering, multiple y-axis support,
+    and interactive data tables with pivot functionality.
     Now supports multiple datasets with tabbed interface and dynamic y-axis plotting per dataset!
     Each selected filter option creates its own row of subplots.
     
@@ -178,6 +179,28 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
             border-bottom: 2px solid #007bff;
             margin-bottom: -2px;
         }}
+        .view-tabs {{
+            display: flex;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 4px;
+            margin-bottom: 20px;
+        }}
+        .view-tab {{
+            background: transparent;
+            border: none;
+            padding: 8px 16px;
+            cursor: pointer;
+            font-size: 14px;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+            color: #666;
+        }}
+        .view-tab.active {{
+            background: white;
+            color: #007bff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }}
         .content-container {{
             display: flex;
             gap: 20px;
@@ -289,6 +312,103 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
         .tab-content.active {{
             display: block;
         }}
+        
+        /* Data Table Styles */
+        .table-container {{
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }}
+        .pivot-controls {{
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }}
+        .control-group {{
+            margin-bottom: 15px;
+        }}
+        .control-label {{
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 5px;
+            display: block;
+            color: #333;
+        }}
+        .control-select {{
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+            background: white;
+        }}
+        .control-row {{
+            display: flex;
+            gap: 15px;
+            align-items: end;
+        }}
+        .control-column {{
+            flex: 1;
+        }}
+        .apply-btn {{
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            white-space: nowrap;
+        }}
+        .apply-btn:hover {{
+            background: #0056b3;
+        }}
+        .table-wrapper {{
+            max-height: 600px;
+            overflow: auto;
+            padding: 20px;
+        }}
+        .data-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }}
+        .data-table th,
+        .data-table td {{
+            padding: 8px 12px;
+            text-align: left;
+            border-bottom: 1px solid #e0e0e0;
+        }}
+        .data-table th {{
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #333;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }}
+        .data-table tbody tr:hover {{
+            background: #f8f9fa;
+        }}
+        .numeric-cell {{
+            text-align: right;
+            font-family: 'Consolas', 'Monaco', monospace;
+        }}
+        .table-stats {{
+            padding: 15px 20px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+            font-size: 12px;
+            color: #666;
+        }}
+        .view-content {{
+            display: none;
+        }}
+        .view-content.active {{
+            display: block;
+        }}
+        
     </style>
 </head>
 <body>
@@ -318,7 +438,54 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                 </div>
             </div>
             <div class="plot-container">
-                <div id="plotDiv"></div>
+                <!-- View toggle buttons -->
+                <div class="view-tabs">
+                    <button class="view-tab active" data-view="plot" onclick="switchView('plot')">Charts</button>
+                    <button class="view-tab" data-view="table" onclick="switchView('table')">Data Table</button>
+                </div>
+                
+                <!-- Plot view -->
+                <div id="plotView" class="view-content active">
+                    <div id="plotDiv"></div>
+                </div>
+                
+                <!-- Table view -->
+                <div id="tableView" class="view-content">
+                    <div class="table-container">
+                        <div class="pivot-controls">
+                            <div class="control-row">
+                                <div class="control-column">
+                                    <label class="control-label">Group By (Rows)</label>
+                                    <select id="groupBySelect" class="control-select">
+                                        <option value="">No Grouping</option>
+                                    </select>
+                                </div>
+                                <div class="control-column">
+                                    <label class="control-label">Aggregate Function</label>
+                                    <select id="aggregateSelect" class="control-select">
+                                        <option value="sum">Sum</option>
+                                        <option value="mean">Average</option>
+                                        <option value="count">Count</option>
+                                        <option value="min">Minimum</option>
+                                        <option value="max">Maximum</option>
+                                        <option value="none">No Aggregation</option>
+                                    </select>
+                                </div>
+                                <div class="control-column">
+                                    <label class="control-label">&nbsp;</label>
+                                    <button class="apply-btn" onclick="updateTable()">Apply</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="table-wrapper">
+                            <table class="data-table" id="dataTable">
+                                <thead id="tableHead"></thead>
+                                <tbody id="tableBody"></tbody>
+                            </table>
+                        </div>
+                        <div class="table-stats" id="tableStats"></div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -342,6 +509,7 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
         let currentDatasetName = Object.keys(allDatasets)[0];
         let currentData = JSON.parse(allDatasets[currentDatasetName]);
         let currentYColumns = yColumnsPerDataset[currentDatasetName];
+        let currentView = 'plot';
         
         // Initialize tabs if multiple datasets
         function initializeTabs() {{
@@ -360,26 +528,373 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
             }});
         }}
         
-        // Switch between datasets
-        function switchDataset(datasetName) {{
-            // Update active tab
-            document.querySelectorAll('.tab').forEach(tab => {{
+// Make sure to call updateGroupByOptions when switching datasets
+function switchDataset(datasetName) {{
+    // Update active tab
+    document.querySelectorAll('.tab').forEach(tab => {{
+        tab.classList.remove('active');
+        if (tab.textContent === datasetName) {{
+            tab.classList.add('active');
+        }}
+    }});
+    
+    // Update current dataset
+    currentDatasetName = datasetName;
+    currentData = JSON.parse(allDatasets[datasetName]);
+    currentYColumns = yColumnsPerDataset[datasetName];
+    
+    // Update filter checkboxes based on current dataset
+    updateFilterCheckboxes();
+    
+    // IMPORTANT: Update group by options for new dataset
+    updateGroupByOptions();
+    
+    // Update current view
+    if (currentView === 'plot') {{
+        updatePlot();
+    }} else {{
+        updateTable();
+    }}
+}}
+        
+        // Switch between views
+        function switchView(viewName) {{
+            currentView = viewName;
+            
+            // Update view tab buttons using data attributes
+            document.querySelectorAll('.view-tab').forEach(tab => {{
                 tab.classList.remove('active');
-                if (tab.textContent === datasetName) {{
+                if (tab.dataset.view === viewName) {{
                     tab.classList.add('active');
                 }}
             }});
             
-            // Update current dataset
-            currentDatasetName = datasetName;
-            currentData = JSON.parse(allDatasets[datasetName]);
-            currentYColumns = yColumnsPerDataset[datasetName];
+            // Update view content
+            document.querySelectorAll('.view-content').forEach(content => {{
+                content.classList.remove('active');
+            }});
             
-            // Update filter checkboxes based on current dataset
-            updateFilterCheckboxes();
+            const targetView = document.getElementById(viewName + 'View');
+            if (targetView) {{
+                targetView.classList.add('active');
+            }}
             
-            // Update plot
-            updatePlot();
+            // Update the appropriate view
+            if (viewName === 'plot') {{
+                updatePlot();
+            }} else if (viewName === 'table') {{
+                updateTable();
+            }}
+        }}
+        
+
+
+        // ENHANCED: Add year extraction to filtered data
+        function getFilteredDataWithYear() {{
+            const filteredData = getFilteredData();
+            
+            // Add year column to each row if it doesn't exist
+            return filteredData.map(row => {{
+                const newRow = {{ ...row }};
+                if (!newRow.Year && row[xColumn]) {{
+                    newRow.Year = extractYear(row[xColumn]);
+                }}
+                return newRow;
+            }});
+        }}
+
+        // ENHANCED: Extract year from date values
+        function extractYear(dateValue) {{
+            if (!dateValue) return null;
+            
+            let date;
+            
+            // Handle different date formats
+            if (typeof dateValue === 'string') {{
+                // Try parsing common date formats
+                if (dateValue.match(/^\d{{4}}-\d{{2}}-\d{{2}}/)) {{
+                    // YYYY-MM-DD format
+                    date = new Date(dateValue);
+                }} else if (dateValue.match(/^\d{{2}}\/\d{{2}}\/\d{{4}}/)) {{
+                    // MM/DD/YYYY format
+                    date = new Date(dateValue);
+                }} else if (dateValue.match(/^\d{{4}}/)) {{
+                    // Just year
+                    return parseInt(dateValue.substring(0, 4));
+                }} else {{
+                    date = new Date(dateValue);
+                }}
+            }} else if (dateValue instanceof Date) {{
+                date = dateValue;
+            }} else {{
+                // Try to convert to date
+                date = new Date(dateValue);
+            }}
+            
+            // Check if date is valid
+            if (isNaN(date.getTime())) {{
+                console.warn('Invalid date value:', dateValue);
+                return null;
+            }}
+            
+            return date.getFullYear();
+        }}
+
+        // ENHANCED: Update group by options with Year extraction from date column
+        function updateGroupByOptions() {{
+            const groupBySelect = document.getElementById('groupBySelect');
+            groupBySelect.innerHTML = '<option value="">No Grouping</option>';
+            
+            // Get all column names from current dataset
+            if (currentData.length > 0) {{
+                const columns = Object.keys(currentData[0]);
+                
+                // Add regular columns
+                columns.forEach(col => {{
+                    const option = document.createElement('option');
+                    option.value = col;
+                    option.textContent = col;
+                    groupBySelect.appendChild(option);
+                }});
+                
+                // Add Year option if date column exists
+                if (columns.includes(xColumn)) {{
+                    const yearOption = document.createElement('option');
+                    yearOption.value = 'Year';
+                    yearOption.textContent = 'Year (from date)';
+                    groupBySelect.appendChild(yearOption);
+                }}
+            }}
+        }}
+        
+        // Get filtered data based on current filter selections
+        function getFilteredData() {{
+            const selectedFilters = [];
+            const currentFilterValues = [...new Set(currentData.map(row => row[filterColumn]))].sort();
+            
+            currentFilterValues.forEach(value => {{
+                const checkbox = document.getElementById(`filter_${{value}}`);
+                if (checkbox && checkbox.checked) {{
+                    selectedFilters.push(value);
+                }}
+            }});
+            
+            if (selectedFilters.length === 0) {{
+                return [];
+            }}
+            
+            return currentData.filter(row => selectedFilters.includes(row[filterColumn]));
+        }}
+        
+        // ENHANCED: Modified updateTable to use the new data function
+        function updateTable() {{
+            const filteredData = getFilteredDataWithYear(); // Use enhanced function
+            const groupBy = document.getElementById('groupBySelect').value;
+            const aggregateFunc = document.getElementById('aggregateSelect').value;
+            
+            const tableHead = document.getElementById('tableHead');
+            const tableBody = document.getElementById('tableBody');
+            const tableStats = document.getElementById('tableStats');
+            
+            if (filteredData.length === 0) {{
+                tableHead.innerHTML = '';
+                tableBody.innerHTML = '<tr><td colspan="100%" style="text-align: center; padding: 20px; color: #666;">No data to display. Please select at least one filter option.</td></tr>';
+                tableStats.innerHTML = '';
+                return;
+            }}
+            
+            let tableData = [...filteredData]; // Create a copy
+            let columns = Object.keys(tableData[0]);
+            
+            // Apply grouping and aggregation if specified
+            if (groupBy && groupBy !== '' && aggregateFunc !== 'none') {{
+                try {{
+                    tableData = performAggregation(filteredData, groupBy, aggregateFunc);
+                    if (tableData.length > 0) {{
+                        columns = Object.keys(tableData[0]);
+                    }}
+                }} catch (error) {{
+                    console.error('Error in aggregation:', error);
+                    tableBody.innerHTML = '<tr><td colspan="100%" style="text-align: center; padding: 20px; color: #d32f2f;">Error performing aggregation. Please try different settings.</td></tr>';
+                    return;
+                }}
+            }}
+            
+            // Create table header
+            const headerRow = document.createElement('tr');
+            columns.forEach(col => {{
+                const th = document.createElement('th');
+                th.textContent = col;
+                th.style.cursor = 'pointer';
+                th.title = 'Click to sort';
+                // Add click handler for sorting
+                th.onclick = () => sortTable(col);
+                headerRow.appendChild(th);
+            }});
+            tableHead.innerHTML = '';
+            tableHead.appendChild(headerRow);
+            
+            // Create table body
+            tableBody.innerHTML = '';
+            
+            tableData.forEach((row, index) => {{
+                const tr = document.createElement('tr');
+                columns.forEach(col => {{
+                    const td = document.createElement('td');
+                    const value = row[col];
+                    
+                    // Format values based on type
+                    if (value === null || value === undefined) {{
+                        td.textContent = '';
+                    }} else if (typeof value === 'number') {{
+                        td.className = 'numeric-cell';
+                        if (Number.isInteger(value)) {{
+                            td.textContent = value.toLocaleString();
+                        }} else {{
+                            td.textContent = value.toLocaleString(undefined, {{
+                                minimumFractionDigits: 0,
+                                maximumFractionDigits: 3
+                            }});
+                        }}
+                    }} else {{
+                        td.textContent = String(value);
+                    }}
+                    
+                    tr.appendChild(td);
+                }});
+                tableBody.appendChild(tr);
+            }});
+            
+            // Update table stats
+            let statsText = `Showing ${{tableData.length}} rows`;
+            if (groupBy && groupBy !== '' && aggregateFunc !== 'none') {{
+                const groupLabel = groupBy === 'Year' ? 'Year (from date)' : groupBy;
+                statsText += ` (grouped by "${{groupLabel}}" using ${{aggregateFunc}})`;
+            }}
+            if (filteredData.length !== currentData.length) {{
+                statsText += ` of ${{currentData.length}} total records`;
+            }}
+            tableStats.innerHTML = statsText;
+        }}
+        
+
+
+
+        // ENHANCED: Modified performAggregation to handle Year grouping
+        function performAggregation(data, groupBy, aggregateFunc) {{
+            if (!groupBy || groupBy === '' || aggregateFunc === 'none') {{
+                return data;
+            }}
+            
+            // If grouping by Year, ensure Year column exists in data
+            let processedData = data;
+            if (groupBy === 'Year') {{
+                processedData = data.map(row => {{
+                    const newRow = {{ ...row }};
+                    if (!newRow.Year && row[xColumn]) {{
+                        newRow.Year = extractYear(row[xColumn]);
+                    }}
+                    return newRow;
+                }});
+            }}
+            
+            // Group data by the groupBy column
+            const groups = {{}};
+            processedData.forEach(row => {{
+                let key = row[groupBy];
+                
+                // Handle null/undefined years
+                if (groupBy === 'Year' && (key === null || key === undefined)) {{
+                    key = 'Unknown Year';
+                }}
+                
+                key = String(key); // Convert to string for consistent keys
+                
+                if (!groups[key]) {{
+                    groups[key] = [];
+                }}
+                groups[key].push(row);
+            }});
+            
+            // Aggregate each group
+            const aggregated = [];
+            
+            // Sort keys - for years, sort numerically
+            const sortedKeys = Object.keys(groups).sort((a, b) => {{
+                if (groupBy === 'Year') {{
+                    const yearA = a === 'Unknown Year' ? Infinity : parseInt(a);
+                    const yearB = b === 'Unknown Year' ? Infinity : parseInt(b);
+                    return yearA - yearB;
+                }} else {{
+                    return a.localeCompare(b);
+                }}
+            }});
+            
+            sortedKeys.forEach(key => {{
+                const group = groups[key];
+                const aggregatedRow = {{}};
+                
+                // Set the grouping column value
+                if (groupBy === 'Year' && key !== 'Unknown Year') {{
+                    aggregatedRow[groupBy] = parseInt(key);
+                }} else {{
+                    aggregatedRow[groupBy] = key;
+                }}
+                
+                // Get all columns from the first row
+                const allColumns = Object.keys(group[0]);
+                
+                allColumns.forEach(col => {{
+                    if (col === groupBy) return; // Skip the grouping column
+                    
+                    // Get all values for this column in the group
+                    const allValues = group.map(row => row[col]);
+                    const numericValues = allValues.filter(val => {{
+                        return val !== null && val !== undefined && val !== '' && 
+                            !isNaN(parseFloat(val)) && isFinite(val);
+                    }}).map(val => parseFloat(val));
+                    
+                    // Apply aggregation function
+                    if (numericValues.length > 0) {{
+                        switch (aggregateFunc) {{
+                            case 'sum':
+                                aggregatedRow[col] = numericValues.reduce((a, b) => a + b, 0);
+                                break;
+                            case 'mean':
+                                aggregatedRow[col] = numericValues.reduce((a, b) => a + b, 0) / numericValues.length;
+                                break;
+                            case 'count':
+                                aggregatedRow[col] = numericValues.length;
+                                break;
+                            case 'min':
+                                aggregatedRow[col] = Math.min(...numericValues);
+                                break;
+                            case 'max':
+                                aggregatedRow[col] = Math.max(...numericValues);
+                                break;
+                            default:
+                                aggregatedRow[col] = numericValues[0];
+                        }}
+                    }} else {{
+                        // For non-numeric columns
+                        if (aggregateFunc === 'count') {{
+                            aggregatedRow[col] = allValues.filter(val => 
+                                val !== null && val !== undefined && val !== ''
+                            ).length;
+                        }} else {{
+                            // Take the first non-null value
+                            const firstValidValue = allValues.find(val => 
+                                val !== null && val !== undefined && val !== ''
+                            );
+                            aggregatedRow[col] = firstValidValue || '';
+                        }}
+                    }}
+                }});
+                
+                aggregated.push(aggregatedRow);
+            }});
+            
+            return aggregated;
         }}
         
         // Update filter checkboxes based on current dataset
@@ -403,7 +918,13 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                 checkbox.id = `filter_${{value}}`;
                 checkbox.value = value;
                 checkbox.checked = true;
-                checkbox.addEventListener('change', updatePlot);
+                checkbox.addEventListener('change', () => {{
+                    if (currentView === 'plot') {{
+                        updatePlot();
+                    }} else {{
+                        updateTable();
+                    }}
+                }});
                 
                 const label = document.createElement('label');
                 label.htmlFor = `filter_${{value}}`;
@@ -467,7 +988,7 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
             return new Date(dateStr);
         }}
         
-        // Create plot traces with filter rows and y-column columns
+        // FIXED: This is the corrected createPlotTraces function and layout section
         function createPlotTraces(data, selectedFilters) {{
             const groups = groupDataByColorFilterAndY(data, selectedFilters);
             const traces = [];
@@ -476,7 +997,17 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
             const numFilterRows = selectedFilters.length;
             const numYCols = currentYColumns.length;
             
-            Object.keys(groups).forEach(key => {{
+            const sortedGroupKeys = Object.keys(groups).sort((a, b) => {{
+                const groupA = groups[a];
+                const groupB = groups[b];
+                // Sort by filter value first, then by color value
+                if (groupA.filterValue !== groupB.filterValue) {{
+                    return groupA.filterValue.localeCompare(groupB.filterValue);
+                }}
+                return groupA.colorValue.localeCompare(groupB.colorValue);
+            }});
+
+            sortedGroupKeys.forEach(key => {{
                 const group = groups[key];
                 const groupData = group.data;
                 
@@ -486,7 +1017,7 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                     const bVal = b[xColumn];
                     
                     // Handle date strings
-                    if (typeof aVal === 'string' && aVal.match(/\\d{{4}}-\\d{{2}}-\\d{{2}}/)) {{
+                    if (typeof aVal === 'string' && aVal.match(/\d{{4}}-\d{{2}}-\d{{2}}/)) {{
                         return new Date(aVal) - new Date(bVal);
                     }}
                     
@@ -521,7 +1052,7 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                 const xValues = groupData.map(row => {{
                     const xVal = row[xColumn];
                     // Try to parse as date if it's a string that looks like a date
-                    if (typeof xVal === 'string' && xVal.match(/\\d{{4}}-\\d{{2}}-\\d{{2}}/)) {{
+                    if (typeof xVal === 'string' && xVal.match(/\d{{4}}-\d{{2}}-\d{{2}}/)) {{
                         return parseDate(xVal);
                     }}
                     return xVal;
@@ -550,10 +1081,10 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                         }}
                     }},
                     hovertemplate: `<b>${{group.colorValue}}</b><br>` +
-                                  `{x}: %{{x}}<br>` +
-                                  `${{group.yColumn}}: %{{y}}<br>` +
-                                  `{filter}: %{{customdata[0]}}<br>` +
-                                  '<extra></extra>',
+                                `${{xColumn}}: %{{x}}<br>` +
+                                `${{group.yColumn}}: %{{y}}<br>` +
+                                `${{filterColumn}}: %{{customdata[0]}}<br>` +
+                                '<extra></extra>',
                     customdata: groupData.map(row => [row[filterColumn]])
                 }};
                 traces.push(trace);
@@ -561,175 +1092,183 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
             
             return traces;
         }}
+
+    // FIXED: Updated updatePlot function with corrected axis configuration
+    function updatePlot() {{
+        const selectedFilters = [];
         
-        // Download data functionality
-        function downloadData() {{
-            const currentDatasetData = currentData;
-            const datasetName = currentDatasetName;
-            
-            // Convert to CSV
-            if (currentDatasetData.length === 0) {{
-                alert('No data available to download');
-                return;
+        // Get currently available filter values for this dataset
+        const currentFilterValues = [...new Set(currentData.map(row => row[filterColumn]))].sort();
+        
+        currentFilterValues.forEach(value => {{
+            const checkbox = document.getElementById(`filter_${{value}}`);
+            if (checkbox && checkbox.checked) {{
+                selectedFilters.push(value);
             }}
-            
-            const headers = Object.keys(currentDatasetData[0]);
-            const csvContent = [
-                headers.join(','),
-                ...currentDatasetData.map(row => 
-                    headers.map(header => {{
-                        const value = row[header];
-                        // Handle values that might contain commas or quotes
-                        if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {{
-                            return `"${{value.replace(/"/g, '""')}}"`;
-                        }}
-                        return value;
-                    }}).join(',')
-                )
-            ].join('\\n');
-            
-            // Create and trigger download
-            const blob = new Blob([csvContent], {{ type: 'text/csv;charset=utf-8;' }});
-            const link = document.createElement('a');
-            const url = URL.createObjectURL(blob);
-            link.setAttribute('href', url);
-            link.setAttribute('download', `${{datasetName}}_data.csv`);
-            link.style.visibility = 'hidden';
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
+        }});
+        
+        if (selectedFilters.length === 0) {{
+            // Clear plot if no filters selected
+            updatePlotHeight(1);
+            Plotly.newPlot('plotDiv', [], {{title: 'Select at least one filter option'}});
+            return;
         }}
         
-        // Update plot based on selected filters
-        function updatePlot() {{
-            const selectedFilters = [];
-            
-            // Get currently available filter values for this dataset
-            const currentFilterValues = [...new Set(currentData.map(row => row[filterColumn]))].sort();
-            
-            currentFilterValues.forEach(value => {{
-                const checkbox = document.getElementById(`filter_${{value}}`);
-                if (checkbox && checkbox.checked) {{
-                    selectedFilters.push(value);
+        // Calculate number of rows for height adjustment
+        const numFilterRows = selectedFilters.length;
+        updatePlotHeight(numFilterRows);
+        
+        // Create new traces
+        const traces = createPlotTraces(currentData, selectedFilters);
+        
+        // Create dynamic title
+        const plotTitle = singleDataset ? baseTitle : `${{baseTitle}} - ${{currentDatasetName}}`;
+        
+        // Calculate subplot layout
+        const numYCols = currentYColumns.length;
+        
+        // Create layout with subplots
+        let layout = {{
+            title: plotTitle,
+            hovermode: 'closest',
+            showlegend: true,
+            height: Math.max(400, 300 * numFilterRows)
+        }};
+        
+        if (numFilterRows > 1 || numYCols > 1) {{
+            // Create subplot specifications
+            const subplotSpecs = [];
+            for (let row = 0; row < numFilterRows; row++) {{
+                const rowSpecs = [];
+                for (let col = 0; col < numYCols; col++) {{
+                    rowSpecs.push({{}});
                 }}
-            }});
-            
-            if (selectedFilters.length === 0) {{
-                // Clear plot if no filters selected
-                updatePlotHeight(1);
-                Plotly.newPlot('plotDiv', [], {{title: 'Select at least one filter option'}});
-                return;
+                subplotSpecs.push(rowSpecs);
             }}
             
-            // Calculate number of rows for height adjustment
-            const numFilterRows = selectedFilters.length;
-            updatePlotHeight(numFilterRows);
-            
-            // Create new traces
-            const traces = createPlotTraces(currentData, selectedFilters);
-            
-            // Create dynamic title
-            const plotTitle = singleDataset ? baseTitle : `${{baseTitle}} - ${{currentDatasetName}}`;
-            
-            // Calculate subplot layout
-            const numYCols = currentYColumns.length;
-            
-            // Create layout with subplots
-            let layout = {{
-                title: plotTitle,
-                hovermode: 'closest',
-                showlegend: true,
-                height: Math.max(400, 300 * numFilterRows)
+            layout.grid = {{
+                rows: numFilterRows,
+                columns: numYCols,
+                pattern: 'independent',
+                roworder: 'top to bottom'
             }};
             
-            if (numFilterRows > 1 || numYCols > 1) {{
-                // Create subplot specifications
-                const subplotSpecs = [];
-                for (let row = 0; row < numFilterRows; row++) {{
-                    const rowSpecs = [];
-                    for (let col = 0; col < numYCols; col++) {{
-                        rowSpecs.push({{}});
-                    }}
-                    subplotSpecs.push(rowSpecs);
-                }}
+            // Add axis labels and titles for each subplot
+            let subplotCounter = 1;
+            for (let filterIdx = 0; filterIdx < selectedFilters.length; filterIdx++) {{
+                const filterValue = selectedFilters[filterIdx];
                 
-                layout.grid = {{
-                    rows: numFilterRows,
-                    columns: numYCols,
-                    pattern: 'independent',
-                    roworder: 'top to bottom'
-                }};
-                
-                // Add axis labels and titles for each subplot
-                let subplotCounter = 1;
-                for (let filterIdx = 0; filterIdx < selectedFilters.length; filterIdx++) {{
-                    const filterValue = selectedFilters[filterIdx];
+                for (let yColIdx = 0; yColIdx < currentYColumns.length; yColIdx++) {{
+                    const yColumn = currentYColumns[yColIdx];
                     
-                    for (let yColIdx = 0; yColIdx < currentYColumns.length; yColIdx++) {{
-                        const yColumn = currentYColumns[yColIdx];
-                        
-                        let xaxisKey = subplotCounter === 1 ? 'xaxis' : `xaxis${{subplotCounter}}`;
-                        let yaxisKey = subplotCounter === 1 ? 'yaxis' : `yaxis${{subplotCounter}}`;
-                        
-                        layout[xaxisKey] = {{
-                            title: filterIdx === selectedFilters.length - 1 ? '{x}' : '',
-                            anchor: yaxisKey.replace('yaxis', 'y'),
-                            type: 'date'  // Set axis type to date for proper formatting
-                        }};
-                        layout[yaxisKey] = {{
-                            title: yColIdx === 0 ? yColumn : '',
-                            anchor: xaxisKey.replace('xaxis', 'x')
-                        }};
-                        
-                        // Add subplot titles
-                        if (!layout.annotations) layout.annotations = [];
-                        
-                        // Filter title (right side of each row, after y-axis label)
-                        if (yColIdx === currentYColumns.length - 1) {{
-                            layout.annotations.push({{
-                                text: `<b>{filter}: ${{filterValue}}</b>`,
-                                showarrow: false,
-                                x: 1.02,
-                                y: 1 - (filterIdx + 0.5) / numFilterRows,
-                                xref: 'paper',
-                                yref: 'paper',
-                                xanchor: 'left',
-                                yanchor: 'middle',
-                                font: {{ size: 12, color: '#333' }},
-                                textangle: 90
-                            }});
-                        }}
-                        
-                        // Y column title (top of column)
-                        if (filterIdx === 0) {{
-                            layout.annotations.push({{
-                                text: `Y: ${{yColumn}}`,
-                                showarrow: false,
-                                x: (yColIdx + 0.5) / numYCols,
-                                y: 1.02,
-                                xref: 'paper',
-                                yref: 'paper',
-                                xanchor: 'center',
-                                yanchor: 'bottom',
-                                font: {{ size: 12, color: '#333' }}
-                            }});
-                        }}
-                        
-                        subplotCounter++;
+                    let xaxisKey = subplotCounter === 1 ? 'xaxis' : `xaxis${{subplotCounter}}`;
+                    let yaxisKey = subplotCounter === 1 ? 'yaxis' : `yaxis${{subplotCounter}}`;
+                    
+                    // FIXED: Corrected anchor references
+                    layout[xaxisKey] = {{
+                        title: filterIdx === selectedFilters.length - 1 ? xColumn : '',
+                        anchor: subplotCounter === 1 ? 'y' : `y${{subplotCounter}}`,
+                        type: 'date'  // Set axis type to date for proper formatting
+                    }};
+                    layout[yaxisKey] = {{
+                        title: yColIdx === 0 ? filterValue : '',
+                        anchor: subplotCounter === 1 ? 'x' : `x${{subplotCounter}}`
+                    }};
+                    
+                    // Add subplot titles
+                    if (!layout.annotations) layout.annotations = [];
+                    
+                    // Y column title (top of column)
+                    if (filterIdx === 0) {{
+                        layout.annotations.push({{
+                            text: `Y: ${{yColumn}}`,
+                            showarrow: false,
+                            x: (yColIdx + 0.5) / numYCols,
+                            y: 1.02,
+                            xref: 'paper',
+                            yref: 'paper',
+                            xanchor: 'center',
+                            yanchor: 'bottom',
+                            font: {{ size: 12, color: '#333' }},
+                            textangle: 0
+                        }});
                     }}
+                    
+                    subplotCounter++;
                 }}
-            }} else {{
-                layout.xaxis = {{ 
-                    title: '{x}',
-                    type: 'date'  // Set axis type to date for proper formatting
-                }};
-                layout.yaxis = {{ title: currentYColumns[0] }};
             }}
-            
-            // Update plot
-            Plotly.newPlot('plotDiv', traces, layout);
+        }} else {{
+            layout.xaxis = {{ 
+                title: xColumn,
+                type: 'date'  // Set axis type to date for proper formatting
+            }};
+            layout.yaxis = {{ title: currentYColumns[0] }};
         }}
         
+        // Update plot
+        Plotly.newPlot('plotDiv', traces, layout);
+    }}
+        
+    
+
+// BONUS: Add table sorting functionality
+let sortColumn = null;
+let sortDirection = 'asc';
+
+function sortTable(column) {{
+    const tableBody = document.getElementById('tableBody');
+    const rows = Array.from(tableBody.querySelectorAll('tr'));
+    
+    // Toggle sort direction if clicking the same column
+    if (sortColumn === column) {{
+        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+    }} else {{
+        sortDirection = 'asc';
+        sortColumn = column;
+    }}
+    
+    // Get column index
+    const headerCells = document.querySelectorAll('#tableHead th');
+    let columnIndex = -1;
+    headerCells.forEach((th, index) => {{
+        if (th.textContent === column) {{
+            columnIndex = index;
+        }}
+    }});
+    
+    if (columnIndex === -1) return;
+    
+    // Sort rows
+    rows.sort((a, b) => {{
+        const aVal = a.cells[columnIndex].textContent.trim();
+        const bVal = b.cells[columnIndex].textContent.trim();
+        
+        // Try to parse as numbers
+        const aNum = parseFloat(aVal.replace(/,/g, ''));
+        const bNum = parseFloat(bVal.replace(/,/g, ''));
+        
+        let comparison = 0;
+        if (!isNaN(aNum) && !isNaN(bNum)) {{
+            comparison = aNum - bNum;
+        }} else {{
+            comparison = aVal.localeCompare(bVal);
+        }}
+        
+        return sortDirection === 'asc' ? comparison : -comparison;
+    }});
+    
+    // Clear and re-append sorted rows
+    tableBody.innerHTML = '';
+    rows.forEach(row => tableBody.appendChild(row));
+    
+    // Update header to show sort direction
+    headerCells.forEach(th => {{
+        th.classList.remove('sort-asc', 'sort-desc');
+        if (th.textContent === column) {{
+            th.classList.add(`sort-${{sortDirection}}`);
+        }}
+    }});
+}}
         // Select all checkboxes
         function selectAll() {{
             const currentFilterValues = [...new Set(currentData.map(row => row[filterColumn]))].sort();
@@ -737,7 +1276,11 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                 const checkbox = document.getElementById(`filter_${{value}}`);
                 if (checkbox) checkbox.checked = true;
             }});
-            updatePlot();
+            if (currentView === 'plot') {{
+                updatePlot();
+            }} else {{
+                updateTable();
+            }}
         }}
         
         // Deselect all checkboxes
@@ -747,13 +1290,23 @@ def superPlotter(data, x="date", y="price", color="quality", filter="location",
                 const checkbox = document.getElementById(`filter_${{value}}`);
                 if (checkbox) checkbox.checked = false;
             }});
+            if (currentView === 'plot') {{
+                updatePlot();
+            }} else {{
+                updateTable();
+            }}
+        }}
+        
+        // Initialize the application
+        function initialize() {{
+            initializeTabs();
+            updateFilterCheckboxes();
+            updateGroupByOptions();
             updatePlot();
         }}
         
-        // Initialize
-        initializeTabs();
-        updateFilterCheckboxes();
-        updatePlot();
+        // Initialize when page loads
+        initialize();
     </script>
 </body>
 </html>
